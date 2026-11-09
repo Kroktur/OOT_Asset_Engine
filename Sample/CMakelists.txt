@@ -1,0 +1,70 @@
+
+
+
+# do not touch that part
+project(Sample)
+set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(SOURCES
+${SOURCE_DIR}/main.cpp
+)
+add_executable(${PROJECT_NAME}
+    ${SOURCES}
+)
+
+
+# Automatic Lib here
+# Dont forget to link lib
+
+# find Packages
+# exemple bellow 
+
+# find_package(SFML COMPONENTS 
+#    System
+#    CONFIG REQUIRED
+# )
+
+
+# Manual Lib here
+# Dont forget to link lib
+# Dont forget to include header lib
+#Copy Dll exemple ONLY MANUAL LIB
+
+# Set Variable for All_LIB
+
+# set(MYLIB ${CMAKE_CURRENT_SOURCE_DIR}/YourlibFolderPath)
+# set(MYLIB_HEADER ${MYLIB}/includeFolder)
+# set(MYLIB_LIB ${MYLIB}/libFolder)
+
+# # Debug
+# file(COPY "${MYLIB_LIB}/Yourlib.dll"
+#      DESTINATION "${EXECUTABLE_OUTPUT_PATH}/Debug")
+
+# # Release
+# file(COPY "${MYLIB_LIB}/Yourlib.dll"
+#      DESTINATION "${EXECUTABLE_OUTPUT_PATH}/Release")
+
+
+# target your All Include here 
+# exemple bellow
+
+
+target_include_directories(${PROJECT_NAME}
+    PUBLIC 
+  # ${MYLIB_HEADER}
+    PRIVATE
+  # ${MYLIB_HEADER}
+)
+
+# target your All libraries here 
+# exemple bellow
+
+target_link_libraries(${PROJECT_NAME}
+    PUBLIC
+    Engine
+  # YourLib
+    PRIVATE
+  # YourLib
+  # ${MYLIB_LIB}/YourLib.lib
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "Sample")
