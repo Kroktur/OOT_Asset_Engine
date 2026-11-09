@@ -68,13 +68,16 @@ source_group(
 # target your All Include here 
 # exemple bellow
 
-
+#KTR
+ set(KTR ${CMAKE_CURRENT_SOURCE_DIR}/../Lib/KTR)
+ set(KTR_HEADER ${KTR}/includes)
 
 
 target_include_directories(${PROJECT_NAME}
     PUBLIC 
     ${HEADER_DIR}
   # ${MYLIB_HEADER}
+    ${KTR_HEADER}
     PRIVATE
   # ${MYLIB_HEADER}
 )
