@@ -1,13 +1,19 @@
 #pragma once
 
 #include <array>
+#include <any>
 #include <bit>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <typeindex>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -42,6 +48,41 @@ public:
     Archive(const Archive&) = delete;
 
     Archive& operator=(const Archive&) = delete;
+
+    template<class Base, class Derived> void registerType(std::string identifier)
+    {
+        static_assert(std::is_polymorphic_v<Base> && std::has_virtual_destructor_v<Base>, "Polymorphic bases require a virtual destructor");
+        static_assert(std::is_convertible_v<Derived*, Base*>);
+        static_assert(std::is_default_constructible_v<Derived>);
+
+        if (identifier.empty())
+        {
+            throw ArchiveError("Empty polymorphic type identifier");
+        }
+
+        checkString(identifier.size());
+        auto [it, inserted] = types_.try_emplace(typeid(Base), std::vector<TypeEntry<Base>>{});
+        auto& entries = std::any_cast<std::vector<TypeEntry<Base>>&>(it->second);
+
+        for (const auto& entry : entries)
+        {
+            if (entry.identifier == identifier || entry.type == typeid(Derived))
+            {
+                throw ArchiveError("Polymorphic type or identifier already registered");
+            }
+        }
+
+        entries.push_back({ std::move(identifier), typeid(Derived), []() -> std::unique_ptr<Base>
+            {
+                return std::make_unique<Derived>();
+            },
+
+            [](Archive& archive, Base& object)
+            {
+                auto& derived = dynamic_cast<Derived&>(object);
+                archive(derived);
+            }};
+    }
 
     bool isReading() const noexcept 
     {
@@ -96,6 +137,14 @@ protected:
     }
 
 private:
+    template <class BaseType> struct BaseTypeEntry
+    {
+        std::string id;
+        std::type_index type;
+        std::function<std::unique_ptr<BaseType>()>create;
+        std::function<void(Archive&, BaseType&)> serialize
+    };
+
     struct DepthGuard 
     {
         Archive& archive;
@@ -278,6 +327,122 @@ private:
         }
     }
 
+    template<class Map> void mapEntries(Map& value, Map& temporary)
+    {
+        std::uint64_t count = isReading() ? 0 : value.size();
+        integer(count);
+
+        if (count > limits_.maxContainerElements || count > value.max_size())
+        {
+            throw ArchiveError("Container size limit exceeded");
+        }
+
+        if (isReading())
+        {
+            for (std::uint64_t i = 0; i < count; ++i)
+            {
+                typename Map::key_type key{};
+                typename Map::mapped_type mapped{};
+                process(key);
+                process(mapped);
+
+                if (!temporary.emplace(std::move(key), std::move(mapped)).second)
+                {
+                    throw ArchiveError("Duplicate map key");
+                }
+            }
+
+            value = std::move(temporary);
+        }
+
+        else
+        {
+            for (auto& [key, mapped] : value)
+            {
+                auto writableKey = key:
+                process(writableKey);
+                process(mapped);
+
+            }
+        }
+    }
+
+    template<class A, class B, class Compare, class Allocator>
+    void process(std::map<A, B, Compare, Allocator>& value)
+    {
+        DepthGuard guard(this*);
+        std::map<A, B, Compare, Allocator> temp(value.key_comp(), value.get_allocator());
+        mapEntries(value, temp);
+    }
+
+    template<class A, class B, class Hash, class Equal, class Allocator>
+    void process(std::unordered_map<A, B, Hash, Equal, Allocator>& value)
+    {
+        DepthGuard guard(this*);
+        std::unordered_map<A, B, Hash, Equal, Allocator> temp(0, value.hash_fuction(), value.key_eq(), value.get_allocator());
+        temp.max_load_factor(value.max_load_factor());
+        mapEntries(vallue, temp);
+    }
+
+    template<class BaseType>
+    void process(std::unique_ptr<BaseType>& value)
+    {
+        static_assert(std::is_polymorphic_v<BaseType> && std::has_virtual_destructor_v<BaseType>, "Polymorphic bases require a virtual destructor");
+        DepthGuard guard(*this);
+        bool present = static_cast<bool>(value);
+        boolean(present);
+
+        if (!present)
+        {
+            if (isReading())
+            {
+                value.reset();
+            }
+
+            return;
+        }
+
+        const auto registry = types_.find(typeid(Base));
+        if (registry == types_.end())
+        {
+            throw ArchiveError("Unregistered polymorphic base");
+        }
+
+        const auto& entries = std::any_cast<const std::vector<TypeEntry<Base>>&>(registry->second);
+        std::string identifier;
+
+        if (isReading())
+        {
+            string(identifier);
+        }
+
+        for (const auto& candidate : entries)
+        {
+            if (isReading() ? candidate.identifier == identifier : candidate.type == typeid(*value))
+            {
+                const auto entry = candidate;
+                if (isReading())
+                {
+                    auto temporary = entry.create();
+                    entry.serialize(*this, *temporary);
+                    value = std::move(temporary);
+                }
+
+                else
+                {
+                    identifier = entry.identifier;
+                    string(identifier);
+                    entry.serialize(*this, *value);
+                }
+
+                return;
+            }
+        }
+
+        throw ArchiveError("Unknown polymorphic type");
+    }
+
+    std::unordered_map<std::type_index, std::any> types_;
     Mode mode_;
     ArchiveLimits limits_;
     std::uint64_t bytes_ = 0;

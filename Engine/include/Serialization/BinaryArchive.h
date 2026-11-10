@@ -66,8 +66,9 @@ private:
                 encoded[i] = static_cast<char>((value >> (8 * i)) & 255);
             }
 
-            bytes(encoded.data(), encoded.size());
         }
+
+        bytes(encoded.data(), encoded.size());
 
         if (isReading())
         {
