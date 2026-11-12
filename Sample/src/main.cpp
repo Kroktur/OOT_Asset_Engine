@@ -7,13 +7,29 @@
 
 using oot::serialization::Archive;
 
-struct test : OOT::BaseRtti
+namespace OOT
+{
+	struct BaseObject : OOT::BaseRtti
+	{
+	public:
+		BaseObject() = default;
+		IMPL_RTTI(BaseObject)
+		virtual void Serialize(){}
+		virtual void Deserialize(){}
+	};
+}
+
+
+
+
+struct test : OOT::BaseObject
 {
     IMPL_RTTI(test)
     int value = 0;
     void serialize(Archive& ar) { ar.serialize(value); }
     void deserialize(Archive& ar) { ar.deserialize(value); }
 };
+struct test2 : OOT::BaseObject
 
 struct test2 : OOT::BaseRtti
 {
@@ -67,8 +83,25 @@ template<class ArchiveType> void example(const char* format)
               << ", value=" << derived->value << ", name=" << derived->name << '\n';
 }
 
+
 int main()
 {
+	
+
+	// simulate load 
+	OOT::ObjectData data = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test3>());
+	OOT::ObjectData data2 = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test2>());
+
+	std::unique_ptr<OOT::BaseObject> create2 = OOT::GetRTTIFactoryId().Create<std::unique_ptr<OOT::BaseObject>>(data2.id);
+	OOT::BaseObject* create = OOT::GetRTTIFactoryId().Create<OOT::BaseObject*>(data.id);
+
+	std::cout << OOT::TypeInfo::Name(*create);
+	std::cout << OOT::TypeInfo::Name(*create2);
+
+	
+	delete create;
+	return 0;
+}
     try
     {
         // The factory is global: register each concrete type only once.
