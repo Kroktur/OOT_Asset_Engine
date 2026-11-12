@@ -5,11 +5,26 @@
 #include "KTR/Hash/KTR_Hasher.h"
 #include "KTR/Containers/KTR_FlatHashMap.h"
 
-struct test : OOT::BaseRtti
+namespace OOT
+{
+	struct BaseObject : OOT::BaseRtti
+	{
+	public:
+		BaseObject() = default;
+		IMPL_RTTI(BaseObject)
+		virtual void Serialize(){}
+		virtual void Deserialize(){}
+	};
+}
+
+
+
+
+struct test : OOT::BaseObject
 {
 	IMPL_RTTI(test)
 };
-struct test2 : OOT::BaseRtti
+struct test2 : OOT::BaseObject
 {
 	IMPL_RTTI(test2)
 };
@@ -22,17 +37,22 @@ struct test3 : test,test2
 
 
 
+
 int main()
 {
-	OOT::Factory::Register<test>(OOT::TypeInfo::Id<test>());
-	OOT::Factory::Register<test2>(OOT::TypeInfo::Id<test2>());
-	OOT::Factory::Register<test3>(OOT::TypeInfo::Id<test3>());
-	OOT::Factory::Register<int>(0);
-	std::unique_ptr<int> t = OOT::Factory::Create<int,std::unique_ptr<int>>(0);
-	test* create = OOT::Factory::Create<test>(OOT::TypeInfo::Id<test2>());
+	
+
+	// simulate load 
+	OOT::ObjectData data = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test3>());
+	OOT::ObjectData data2 = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test2>());
+
+	std::unique_ptr<OOT::BaseObject> create2 = OOT::GetRTTIFactoryId().Create<std::unique_ptr<OOT::BaseObject>>(data2.id);
+	OOT::BaseObject* create = OOT::GetRTTIFactoryId().Create<OOT::BaseObject*>(data.id);
+
 	std::cout << OOT::TypeInfo::Name(*create);
+	std::cout << OOT::TypeInfo::Name(*create2);
 
+	
 	delete create;
-
 	return 0;
 }
