@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include "../RTTI.h"
+#include "../Factory.h"
 #include <any>
 #include <bit>
 #include <cstdint>
@@ -49,11 +51,15 @@ public:
 
     Archive& operator=(const Archive&) = delete;
 
-    template<class Base, class Derived> void registerType(std::string identifier)
+    // Register Derived in OOT::Factory once during application initialization.
+    // This method only registers the archive's fields and type identifier;
+    // it does not re-register or modify entries in the user's factory.
+    template<class Base, class Derived> void registerType(std::string identifier = OOT::TypeInfo::Name<Derived>())
     {
         static_assert(std::is_polymorphic_v<Base> && std::has_virtual_destructor_v<Base>, "Polymorphic bases require a virtual destructor");
         static_assert(std::is_convertible_v<Derived*, Base*>);
         static_assert(std::is_default_constructible_v<Derived>);
+        static_assert(OOT::is_rtti_type<Base> && OOT::is_rtti_type<Derived>);
 
         if (identifier.empty())
         {
@@ -66,22 +72,42 @@ public:
 
         for (const auto& entry : entries)
         {
-            if (entry.identifier == identifier || entry.type == typeid(Derived))
+            if (entry.identifier == identifier || entry.id == OOT::TypeInfo::Id<Derived>())
             {
                 throw ArchiveError("Polymorphic type or identifier already registered");
             }
         }
 
-        entries.push_back({ std::move(identifier), typeid(Derived), []() -> std::unique_ptr<Base>
+        entries.push_back({ std::move(identifier), OOT::TypeInfo::Id<Derived>(), []() -> std::unique_ptr<Base>
             {
-                return std::make_unique<Derived>();
+                return std::unique_ptr<Derived>(OOT::Factory::Create<Derived>(OOT::TypeInfo::Id<Derived>()));
             },
 
             [](Archive& archive, Base& object)
             {
                 auto& derived = dynamic_cast<Derived&>(object);
                 archive(derived);
-            }};
+            }});
+    }
+
+    template<class... T> void serialize(T&... values)
+    {
+        if (!isWriting())
+        {
+            throw ArchiveError("serialize requires an output archive");
+        }
+
+        (*this)(values...);
+    }
+
+    template<class... T> void deserialize(T&... values)
+    {
+        if (!isReading())
+        {
+            throw ArchiveError("deserialize requires an input archive");
+        }
+
+        (*this)(values...);
     }
 
     bool isReading() const noexcept 
@@ -137,12 +163,12 @@ protected:
     }
 
 private:
-    template <class BaseType> struct BaseTypeEntry
+    template<class Base> struct TypeEntry
     {
-        std::string id;
-        std::type_index type;
-        std::function<std::unique_ptr<BaseType>()>create;
-        std::function<void(Archive&, BaseType&)> serialize
+        std::string identifier;
+        OOT::Factory::id_type id;
+        std::function<std::unique_ptr<Base>()> create;
+        std::function<void(Archive&, Base&)> serialize;
     };
 
     struct DepthGuard 
@@ -243,7 +269,23 @@ private:
         else 
         {
             DepthGuard guard(*this);
-            value.serialize(*this);
+            if constexpr (requires { value.deserialize(*this); })
+            {
+                if (isReading())
+                {
+                    value.deserialize(*this);
+                }
+
+                else
+                {
+                    value.serialize(*this);
+                }
+            }
+
+            else
+            {
+                value.serialize(*this);
+            }
         }
     }
 
@@ -359,7 +401,7 @@ private:
         {
             for (auto& [key, mapped] : value)
             {
-                auto writableKey = key:
+                auto writableKey = key;
                 process(writableKey);
                 process(mapped);
 
@@ -370,7 +412,7 @@ private:
     template<class A, class B, class Compare, class Allocator>
     void process(std::map<A, B, Compare, Allocator>& value)
     {
-        DepthGuard guard(this*);
+        DepthGuard guard(*this);
         std::map<A, B, Compare, Allocator> temp(value.key_comp(), value.get_allocator());
         mapEntries(value, temp);
     }
@@ -378,10 +420,10 @@ private:
     template<class A, class B, class Hash, class Equal, class Allocator>
     void process(std::unordered_map<A, B, Hash, Equal, Allocator>& value)
     {
-        DepthGuard guard(this*);
-        std::unordered_map<A, B, Hash, Equal, Allocator> temp(0, value.hash_fuction(), value.key_eq(), value.get_allocator());
+        DepthGuard guard(*this);
+        std::unordered_map<A, B, Hash, Equal, Allocator> temp(0, value.hash_function(), value.key_eq(), value.get_allocator());
         temp.max_load_factor(value.max_load_factor());
-        mapEntries(vallue, temp);
+        mapEntries(value, temp);
     }
 
     template<class BaseType>
@@ -402,13 +444,13 @@ private:
             return;
         }
 
-        const auto registry = types_.find(typeid(Base));
+        const auto registry = types_.find(typeid(BaseType));
         if (registry == types_.end())
         {
             throw ArchiveError("Unregistered polymorphic base");
         }
 
-        const auto& entries = std::any_cast<const std::vector<TypeEntry<Base>>&>(registry->second);
+        const auto& entries = std::any_cast<const std::vector<TypeEntry<BaseType>>&>(registry->second);
         std::string identifier;
 
         if (isReading())
@@ -418,7 +460,7 @@ private:
 
         for (const auto& candidate : entries)
         {
-            if (isReading() ? candidate.identifier == identifier : candidate.type == typeid(*value))
+            if (isReading() ? candidate.identifier == identifier : candidate.id == OOT::TypeInfo::Id(*value))
             {
                 const auto entry = candidate;
                 if (isReading())
