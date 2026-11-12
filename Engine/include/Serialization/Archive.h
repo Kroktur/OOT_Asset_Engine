@@ -1,0 +1,493 @@
+#pragma once
+
+#include <array>
+#include "../RTTI.h"
+#include "../Factory.h"
+#include <any>
+#include <bit>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <map>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <typeindex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace oot::serialization 
+{
+
+class ArchiveError : public std::runtime_error 
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
+struct ArchiveLimits 
+{
+    std::uint64_t maxStringBytes = 16 * 1024 * 1024;
+    std::uint64_t maxContainerElements = 1'000'000;
+    std::uint64_t maxArchiveBytes = 64 * 1024 * 1024;
+    std::uint32_t maxDepth = 64;
+};
+
+class Archive 
+{
+public:
+    enum class Mode 
+    {
+        Read,
+        Write
+    };
+
+    virtual ~Archive() = default;
+
+    Archive(const Archive&) = delete;
+
+    Archive& operator=(const Archive&) = delete;
+
+    // Register Derived in OOT::Factory once during application initialization.
+    // This method only registers the archive's fields and type identifier;
+    // it does not re-register or modify entries in the user's factory.
+    template<class Base, class Derived> void registerType(std::string identifier = OOT::TypeInfo::Name<Derived>())
+    {
+        static_assert(std::is_polymorphic_v<Base> && std::has_virtual_destructor_v<Base>, "Polymorphic bases require a virtual destructor");
+        static_assert(std::is_convertible_v<Derived*, Base*>);
+        static_assert(std::is_default_constructible_v<Derived>);
+        static_assert(OOT::is_rtti_type<Base> && OOT::is_rtti_type<Derived>);
+
+        if (identifier.empty())
+        {
+            throw ArchiveError("Empty polymorphic type identifier");
+        }
+
+        checkString(identifier.size());
+        auto [it, inserted] = types_.try_emplace(typeid(Base), std::vector<TypeEntry<Base>>{});
+        auto& entries = std::any_cast<std::vector<TypeEntry<Base>>&>(it->second);
+
+        for (const auto& entry : entries)
+        {
+            if (entry.identifier == identifier || entry.id == OOT::TypeInfo::Id<Derived>())
+            {
+                throw ArchiveError("Polymorphic type or identifier already registered");
+            }
+        }
+
+        entries.push_back({ std::move(identifier), OOT::TypeInfo::Id<Derived>(), []() -> std::unique_ptr<Base>
+            {
+                return std::unique_ptr<Derived>(OOT::Factory::Create<Derived>(OOT::TypeInfo::Id<Derived>()));
+            },
+
+            [](Archive& archive, Base& object)
+            {
+                auto& derived = dynamic_cast<Derived&>(object);
+                archive(derived);
+            }});
+    }
+
+    template<class... T> void serialize(T&... values)
+    {
+        if (!isWriting())
+        {
+            throw ArchiveError("serialize requires an output archive");
+        }
+
+        (*this)(values...);
+    }
+
+    template<class... T> void deserialize(T&... values)
+    {
+        if (!isReading())
+        {
+            throw ArchiveError("deserialize requires an input archive");
+        }
+
+        (*this)(values...);
+    }
+
+    bool isReading() const noexcept 
+    {
+        return mode_ == Mode::Read;
+    }
+
+    bool isWriting() const noexcept 
+    {
+        return !isReading();
+    }
+
+    template<class... T> void operator()(T&... values) 
+    {
+        (process(values), ...);
+    }
+
+    template<class T> Archive& operator&(T& value) 
+    {
+        process(value); return *this;
+    }
+
+protected:
+    explicit Archive(Mode mode, ArchiveLimits limits) : mode_(mode), limits_(limits) {}
+
+    virtual void integer(std::uint64_t&) = 0;
+    virtual void signedInteger(std::int64_t&) = 0;
+    virtual void real(double&) = 0;
+    virtual void boolean(bool&) = 0;
+    virtual void string(std::string&) = 0;
+
+    const ArchiveLimits& limits() const noexcept 
+    {
+        return limits_;
+    }
+
+    void consume(std::uint64_t bytes) 
+    {
+        if (bytes > limits_.maxArchiveBytes - bytes_)
+        {
+            throw ArchiveError("Archive byte limit exceeded");
+        }
+
+        bytes_ += bytes;
+    }
+
+    void checkString(std::uint64_t size) const 
+    {
+        if (size > limits_.maxStringBytes || size > std::string{}.max_size())
+        {
+            throw ArchiveError("String size limit exceeded");
+        }
+    }
+
+private:
+    template<class Base> struct TypeEntry
+    {
+        std::string identifier;
+        OOT::Factory::id_type id;
+        std::function<std::unique_ptr<Base>()> create;
+        std::function<void(Archive&, Base&)> serialize;
+    };
+
+    struct DepthGuard 
+    {
+        Archive& archive;
+
+        explicit DepthGuard(Archive& a) : archive(a) 
+        {
+            if (a.depth_ >= a.limits_.maxDepth)
+            {
+                throw ArchiveError("Archive nesting limit exceeded");
+            }
+
+            ++a.depth_;
+        }
+
+        ~DepthGuard() { --archive.depth_; }
+    };
+
+    template<class T> void process(T& value) 
+    {
+        static_assert(!std::is_const_v<T>, "serialize requires mutable fields");
+
+        if constexpr (std::is_same_v<T, bool>)
+        {
+            boolean(value);
+        }
+
+        else if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) 
+        {
+            static_assert(sizeof(T) <= sizeof(std::int64_t));
+            std::int64_t temporary = isReading() ? 0 : value;
+            signedInteger(temporary);
+
+            if (temporary < std::numeric_limits<T>::min() || temporary > std::numeric_limits<T>::max())
+            {
+                throw ArchiveError("Signed integer out of range");
+            }
+
+            if (isReading())
+            {
+                value = static_cast<T>(temporary);
+            }
+        }
+
+        else if constexpr (std::is_integral_v<T>) 
+        {
+            static_assert(sizeof(T) <= sizeof(std::uint64_t));
+            std::uint64_t temporary = isReading() ? 0 : value;
+            integer(temporary);
+
+            if (temporary > std::numeric_limits<T>::max())
+            {
+                throw ArchiveError("Unsigned integer out of range");
+            }
+
+            if (isReading())
+            {
+                value = static_cast<T>(temporary);
+            }
+        }
+
+        else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) 
+        {
+            double temporary = isReading() ? 0 : value;
+            real(temporary);
+
+            if constexpr (std::is_same_v<T, float>) 
+            {
+                if (temporary > std::numeric_limits<float>::max() || temporary < -std::numeric_limits<float>::max())
+                {
+                    throw ArchiveError("Float out of range");
+                }
+            }
+
+            if (isReading())
+            {
+                value = static_cast<T>(temporary);
+            }
+        }
+        
+        else if constexpr (std::is_enum_v<T>)
+        {
+            auto temporary = isReading() ? std::underlying_type_t<T>{} : static_cast<std::underlying_type_t<T>>(value);
+            process(temporary);
+
+            if (isReading())
+            {
+                value = static_cast<T>(temporary);
+            }
+        }
+        
+        else if constexpr (std::is_same_v<T, std::string>)
+        {
+            string(value);
+        }
+
+        else 
+        {
+            DepthGuard guard(*this);
+            if constexpr (requires { value.deserialize(*this); })
+            {
+                if (isReading())
+                {
+                    value.deserialize(*this);
+                }
+
+                else
+                {
+                    value.serialize(*this);
+                }
+            }
+
+            else
+            {
+                value.serialize(*this);
+            }
+        }
+    }
+
+    template<class T, class Allocator> void process(std::vector<T, Allocator>& value) 
+    {
+        DepthGuard guard(*this);
+        std::uint64_t count = isReading() ? 0 : value.size();
+        integer(count);
+
+        if (count > limits_.maxContainerElements || count > value.max_size())
+        {
+            throw ArchiveError("Container size limit exceeded");
+        }
+
+        if (isReading())
+        {
+            std::vector<T, Allocator> temporary(value.get_allocator());
+            for (std::uint64_t i = 0; i < count; ++i) 
+            {
+                T element{};
+                process(element);
+                temporary.push_back(std::move(element));
+            }
+
+            value = std::move(temporary);
+        }
+        
+        else
+        {
+            for (std::size_t i = 0; i < value.size(); ++i) 
+            {
+                if constexpr (std::is_same_v<T, bool>)
+                {
+                    bool element = value[i]; process(element);
+                }
+
+                else
+                {
+                    process(value[i]);
+                }
+            }
+        }
+    }
+
+    template<class T, std::size_t N> void process(std::array<T, N>& value) 
+    {
+        DepthGuard guard(*this);
+        if (N > limits_.maxContainerElements)
+        {
+            throw ArchiveError("Container size limit exceeded");
+        }
+
+        for (auto& element : value)
+        {
+            process(element);
+        }
+    }
+
+    template<class T> void process(std::optional<T>& value)
+    {
+        DepthGuard guard(*this);
+        bool present = value.has_value();
+        boolean(present);
+
+        if (isReading())
+        {
+            if (present)
+            {
+                T temporary{}; process(temporary); value = std::move(temporary);
+            }
+
+            else
+            {
+                value.reset();
+            }
+        }
+        
+        else if (present)
+        {
+            process(*value);
+        }
+    }
+
+    template<class Map> void mapEntries(Map& value, Map& temporary)
+    {
+        std::uint64_t count = isReading() ? 0 : value.size();
+        integer(count);
+
+        if (count > limits_.maxContainerElements || count > value.max_size())
+        {
+            throw ArchiveError("Container size limit exceeded");
+        }
+
+        if (isReading())
+        {
+            for (std::uint64_t i = 0; i < count; ++i)
+            {
+                typename Map::key_type key{};
+                typename Map::mapped_type mapped{};
+                process(key);
+                process(mapped);
+
+                if (!temporary.emplace(std::move(key), std::move(mapped)).second)
+                {
+                    throw ArchiveError("Duplicate map key");
+                }
+            }
+
+            value = std::move(temporary);
+        }
+
+        else
+        {
+            for (auto& [key, mapped] : value)
+            {
+                auto writableKey = key;
+                process(writableKey);
+                process(mapped);
+
+            }
+        }
+    }
+
+    template<class A, class B, class Compare, class Allocator>
+    void process(std::map<A, B, Compare, Allocator>& value)
+    {
+        DepthGuard guard(*this);
+        std::map<A, B, Compare, Allocator> temp(value.key_comp(), value.get_allocator());
+        mapEntries(value, temp);
+    }
+
+    template<class A, class B, class Hash, class Equal, class Allocator>
+    void process(std::unordered_map<A, B, Hash, Equal, Allocator>& value)
+    {
+        DepthGuard guard(*this);
+        std::unordered_map<A, B, Hash, Equal, Allocator> temp(0, value.hash_function(), value.key_eq(), value.get_allocator());
+        temp.max_load_factor(value.max_load_factor());
+        mapEntries(value, temp);
+    }
+
+    template<class BaseType>
+    void process(std::unique_ptr<BaseType>& value)
+    {
+        static_assert(std::is_polymorphic_v<BaseType> && std::has_virtual_destructor_v<BaseType>, "Polymorphic bases require a virtual destructor");
+        DepthGuard guard(*this);
+        bool present = static_cast<bool>(value);
+        boolean(present);
+
+        if (!present)
+        {
+            if (isReading())
+            {
+                value.reset();
+            }
+
+            return;
+        }
+
+        const auto registry = types_.find(typeid(BaseType));
+        if (registry == types_.end())
+        {
+            throw ArchiveError("Unregistered polymorphic base");
+        }
+
+        const auto& entries = std::any_cast<const std::vector<TypeEntry<BaseType>>&>(registry->second);
+        std::string identifier;
+
+        if (isReading())
+        {
+            string(identifier);
+        }
+
+        for (const auto& candidate : entries)
+        {
+            if (isReading() ? candidate.identifier == identifier : candidate.id == OOT::TypeInfo::Id(*value))
+            {
+                const auto entry = candidate;
+                if (isReading())
+                {
+                    auto temporary = entry.create();
+                    entry.serialize(*this, *temporary);
+                    value = std::move(temporary);
+                }
+
+                else
+                {
+                    identifier = entry.identifier;
+                    string(identifier);
+                    entry.serialize(*this, *value);
+                }
+
+                return;
+            }
+        }
+
+        throw ArchiveError("Unknown polymorphic type");
+    }
+
+    std::unordered_map<std::type_index, std::any> types_;
+    Mode mode_;
+    ArchiveLimits limits_;
+    std::uint64_t bytes_ = 0;
+    std::uint32_t depth_ = 0;
+};
+}
