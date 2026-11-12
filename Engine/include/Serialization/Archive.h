@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <memory>
+#include <limits>
 #include "../RTTI.h"
 #include "../Factory.h"
 #include <any>
@@ -51,9 +53,6 @@ public:
 
     Archive& operator=(const Archive&) = delete;
 
-    // Register Derived in OOT::Factory once during application initialization.
-    // This method only registers the archive's fields and type identifier;
-    // it does not re-register or modify entries in the user's factory.
     template<class Base, class Derived> void registerType(std::string identifier = OOT::TypeInfo::Name<Derived>())
     {
         static_assert(std::is_polymorphic_v<Base> && std::has_virtual_destructor_v<Base>, "Polymorphic bases require a virtual destructor");
@@ -80,7 +79,7 @@ public:
 
         entries.push_back({ std::move(identifier), OOT::TypeInfo::Id<Derived>(), []() -> std::unique_ptr<Base>
             {
-                return std::unique_ptr<Derived>(OOT::Factory::Create<Derived>(OOT::TypeInfo::Id<Derived>()));
+                return OOT::GetRTTIFactoryId().Create<std::unique_ptr<Derived>>(OOT::TypeInfo::Id<Derived>());
             },
 
             [](Archive& archive, Base& object)
@@ -166,7 +165,7 @@ private:
     template<class Base> struct TypeEntry
     {
         std::string identifier;
-        OOT::Factory::id_type id;
+        OOT::rtti_id_type id;
         std::function<std::unique_ptr<Base>()> create;
         std::function<void(Archive&, Base&)> serialize;
     };
@@ -269,7 +268,20 @@ private:
         else 
         {
             DepthGuard guard(*this);
-            if constexpr (requires { value.deserialize(*this); })
+            if constexpr (requires { value.Serialize(*this); value.Deserialize(*this); })
+            {
+                if (isReading())
+                {
+                    value.Deserialize(*this);
+                }
+
+                else
+                {
+                    value.Serialize(*this);
+                }
+            }
+
+            else if constexpr (requires { value.deserialize(*this); })
             {
                 if (isReading())
                 {

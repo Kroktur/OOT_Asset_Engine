@@ -1,7 +1,5 @@
 #include <iostream>
 #include <sstream>
-#include "Factory.h"
-#include "RTTI.h"
 #include "Serialization/BinaryArchive.h"
 #include "Serialization/TextArchive.h"
 
@@ -9,50 +7,46 @@ using oot::serialization::Archive;
 
 namespace OOT
 {
-	struct BaseObject : OOT::BaseRtti
-	{
-	public:
-		BaseObject() = default;
-		IMPL_RTTI(BaseObject)
-		virtual void Serialize(){}
-		virtual void Deserialize(){}
-	};
+    struct BaseObject : OOT::BaseRtti
+    {
+    public:
+        BaseObject() = default;
+        IMPL_RTTI(BaseObject)
+        virtual void Serialize(Archive&) {}
+        virtual void Deserialize(Archive&) {}
+    };
 }
-
-
-
 
 struct test : OOT::BaseObject
 {
     IMPL_RTTI(test)
     int value = 0;
-    void serialize(Archive& ar) { ar.serialize(value); }
-    void deserialize(Archive& ar) { ar.deserialize(value); }
+    void Serialize(Archive& ar) override { ar.serialize(value); }
+    void Deserialize(Archive& ar) override { ar.deserialize(value); }
 };
-struct test2 : OOT::BaseObject
 
-struct test2 : OOT::BaseRtti
+struct test2 : OOT::BaseObject
 {
     IMPL_RTTI(test2)
     std::string name;
-    void serialize(Archive& ar) { ar.serialize(name); }
-    void deserialize(Archive& ar) { ar.deserialize(name); }
+    void Serialize(Archive& ar) override { ar.serialize(name); }
+    void Deserialize(Archive& ar) override { ar.deserialize(name); }
 };
 
 struct test3 : test, test2
 {
     IMPL_RTTI(test3)
     std::map<std::string, std::vector<int>> values;
-    void serialize(Archive& ar)
+    void Serialize(Archive& ar) override
     {
-        test::serialize(ar);
-        test2::serialize(ar);
+        test::Serialize(ar);
+        test2::Serialize(ar);
         ar.serialize(values);
     }
-    void deserialize(Archive& ar)
+    void Deserialize(Archive& ar) override
     {
-        test::deserialize(ar);
-        test2::deserialize(ar);
+        test::Deserialize(ar);
+        test2::Deserialize(ar);
         ar.deserialize(values);
     }
 };
@@ -76,41 +70,33 @@ template<class ArchiveType> void example(const char* format)
     std::unique_ptr<test2> restored;
     reader.deserialize(restored);
     const auto* derived = dynamic_cast<test3*>(restored.get());
-    if (!derived || derived->value != 42 || derived->name != "Asset example"
-        || derived->values.at("coordinates") != std::vector<int>{1, 2, 3})
-        throw std::runtime_error("Archive round-trip failed");
-    std::cout << format << ": " << OOT::TypeInfo::Name(*restored)
-              << ", value=" << derived->value << ", name=" << derived->name << '\n';
-}
 
+    if (!derived || derived->value != 42 || derived->name != "Asset example" || derived->values.at("coordinates") != std::vector<int>{1, 2, 3})
+    {
+        throw std::runtime_error("Archive round-trip failed");
+    }
+
+    std::cout << format << ": " << OOT::TypeInfo::Name(*restored) << ", value=" << derived->value << ", name=" << derived->name << '\n';
+}
 
 int main()
 {
-	
-
-	// simulate load 
-	OOT::ObjectData data = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test3>());
-	OOT::ObjectData data2 = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test2>());
-
-	std::unique_ptr<OOT::BaseObject> create2 = OOT::GetRTTIFactoryId().Create<std::unique_ptr<OOT::BaseObject>>(data2.id);
-	OOT::BaseObject* create = OOT::GetRTTIFactoryId().Create<OOT::BaseObject*>(data.id);
-
-	std::cout << OOT::TypeInfo::Name(*create);
-	std::cout << OOT::TypeInfo::Name(*create2);
-
-	
-	delete create;
-	return 0;
-}
     try
     {
-        // The factory is global: register each concrete type only once.
-        OOT::Factory::Register<test3>(OOT::TypeInfo::Id<test3>());
-        OOT::Factory::Register<int>(0);
-        auto number = OOT::Factory::Create<int, std::unique_ptr<int>>(0);
+        OOT::ObjectData data = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test3>());
+        OOT::ObjectData data2 = OOT::GetDataRegistry().Create(OOT::TypeInfo::Id<test2>());
+
+        std::unique_ptr<OOT::BaseObject> create2 = OOT::GetRTTIFactoryId().Create<std::unique_ptr<test2>>(data2.id);
+        auto concrete = OOT::GetRTTIFactoryId().Create<std::unique_ptr<test3>>(data.id);
+        OOT::BaseObject* create = static_cast<test2*>(concrete.get());
+
+        std::cout << OOT::TypeInfo::Name(*create) << '\n';
+        std::cout << OOT::TypeInfo::Name(*create2) << '\n';
+
         example<oot::serialization::BinaryArchive>("Binary");
         example<oot::serialization::TextArchive>("Text");
     }
+
     catch (const std::exception& error)
     {
         std::cerr << error.what() << '\n';
