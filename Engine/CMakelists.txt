@@ -72,12 +72,17 @@ source_group(
  set(KTR ${CMAKE_CURRENT_SOURCE_DIR}/../Lib/KTR)
  set(KTR_HEADER ${KTR}/includes)
 
+#JSON
+ set(JSON ${CMAKE_CURRENT_SOURCE_DIR}/../Lib/JSON)
+ set(JSON_HEADER ${JSON}/include)
+
 
 target_include_directories(${PROJECT_NAME}
     PUBLIC 
     ${HEADER_DIR}
   # ${MYLIB_HEADER}
     ${KTR_HEADER}
+    ${JSON_HEADER}
     PRIVATE
   # ${MYLIB_HEADER}
 )
