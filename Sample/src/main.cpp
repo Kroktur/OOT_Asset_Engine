@@ -2,6 +2,7 @@
 #include <sstream>
 #include "Serialization/BinaryArchive.h"
 #include "Serialization/TextArchive.h"
+#include "Serialization/ArchiveFile.h"
 
 using oot::serialization::Archive;
 
@@ -59,16 +60,19 @@ template<class ArchiveType> void example(const char* format)
     object->values = {{"coordinates", {1, 2, 3}}};
     std::unique_ptr<test2> original = std::move(object);
 
-    std::ostringstream output;
-    ArchiveType writer(output);
-    writer.template registerType<test2, test3>();
-    writer.serialize(original);
-
-    std::istringstream input(output.str());
-    ArchiveType reader(input);
-    reader.template registerType<test2, test3>();
+    const auto setup = [](Archive& archive) { archive.registerType<test2, test3>(); };
     std::unique_ptr<test2> restored;
-    reader.deserialize(restored);
+    if constexpr (std::is_same_v<ArchiveType, oot::serialization::BinaryArchive>)
+    {
+        oot::serialization::SaveBinary("archives/example.bin", original, setup);
+        oot::serialization::LoadBinary("archives/example.bin", restored, setup);
+    }
+
+    else
+    {
+        oot::serialization::SaveJson("archives/example.json", original, setup);
+        oot::serialization::LoadJson("archives/example.json", restored, setup);
+    }
     const auto* derived = dynamic_cast<test3*>(restored.get());
 
     if (!derived || derived->value != 42 || derived->name != "Asset example" || derived->values.at("coordinates") != std::vector<int>{1, 2, 3})
@@ -94,7 +98,7 @@ int main()
         std::cout << OOT::TypeInfo::Name(*create2) << '\n';
 
         example<oot::serialization::BinaryArchive>("Binary");
-        example<oot::serialization::TextArchive>("Text");
+        example<oot::serialization::TextArchive>("JSON");
     }
 
     catch (const std::exception& error)

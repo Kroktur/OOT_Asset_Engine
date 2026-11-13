@@ -1,324 +1,310 @@
 #pragma once
 #include "Archive.h"
-#include <charconv>
+#include <json.hpp>
 #include <cmath>
 #include <istream>
 #include <ostream>
+#include <set>
 
-namespace oot::serialization 
+namespace oot::serialization
 {
-
-class TextArchive final : public Archive 
+class TextArchive final : public Archive
 {
 public:
     explicit TextArchive(std::istream& input, ArchiveLimits limits = {})
-        : Archive(Mode::Read, limits), input_(&input) { header(); }
+        : Archive(Mode::Read, limits)
+    {
+        readDocument(input);
+    }
 
     explicit TextArchive(std::ostream& output, ArchiveLimits limits = {})
-        : Archive(Mode::Write, limits), output_(&output) { header(); }
+        : Archive(Mode::Write, limits), output_(&output)
+    {
+        write("{\n  \"format\": \"OOT-JSON\",\n  \"version\": 1,\n  \"values\": [");
+    }
+
+    void finish() override
+    {
+        if (finished_)
+        {
+            return;
+        }
+
+        if (isReading())
+        {
+            if (cursor_ != values_.size())
+            {
+                throw ArchiveError("Unused JSON archive fields");
+            }
+        }
+
+        else
+        {
+            write("\n  ]\n}\n");
+        }
+        finished_ = true;
+    }
 
 private:
-    char get() 
-    {
-        consume(1);
-        char c{};
+    using Json = nlohmann::json;
 
-        try
+    void checkOpen() const
+    {
+        if (finished_)
         {
-            input_->get(c);
+            throw ArchiveError("JSON archive is already finished");
+        }
+    }
+
+    void write(const std::string& text)
+    {
+        consume(text.size());
+        try 
+        {
+            output_->write(text.data(), static_cast<std::streamsize>(text.size()));
         }
 
         catch (const std::ios_base::failure&)
         {
-            throw ArchiveError("Text archive I/O failure");
-        }
-
-        if (!*input_)
-        {
-            throw ArchiveError("Truncated text archive");
-        }
-
-        return c;
-    }
-
-    void put(char c) 
-    {
-        consume(1);
-        try 
-        { 
-            output_->put(c);
-        }
-
-        catch (const std::ios_base::failure&) 
-        {
-            throw ArchiveError("Text archive I/O failure");
+            throw ArchiveError("JSON archive I/O failure");
         }
 
         if (!*output_)
         {
-            throw ArchiveError("Text archive I/O failure");
+            throw ArchiveError("JSON archive I/O failure");
         }
     }
 
-    void write(const std::string& value)
+    void append(const Json& value)
     {
-        for (char c : value)
+        checkOpen();
+        std::string encoded;
+        try
         {
-            put(c);
+            encoded = value.dump();
         }
+
+        catch (const Json::exception& error)
+        {
+            throw ArchiveError(error.what());
+        }
+
+        write((first_ ? "\n    " : ",\n    ") + encoded);
+        first_ = false;
     }
 
-    void expect(char c)
+    const Json& next()
     {
-        if (get() != c)
+        checkOpen();
+        if (cursor_ >= values_.size())
         {
-            throw ArchiveError("Malformed text archive");
+            throw ArchiveError("Missing JSON archive field");
         }
+
+        return values_[cursor_++];
     }
 
-    std::string line() 
+    void readDocument(std::istream& input)
     {
-        std::string result;
-
-        for (;;) 
+        std::string source;
+        for (;;)
         {
-            char c = get();
-
-            if (c == '\n')
+            int c;
+            try
             {
-                return result;
+                c = input.get();
             }
 
-            if (result.size() >= 128)
+            catch (const std::ios_base::failure&)
             {
-                throw ArchiveError("Numeric token too long");
-            }
-
-            result += c;
-        }
-    }
-
-    void header()
-    {
-        if (isReading())
-        {
-            if (line() != "OOT-TEXT 1")
-            {
-                throw ArchiveError("Invalid text archive signature or version");
-            }
-        }
-
-        else
-        {
-            write("OOT-TEXT 1\n");
-        }
-    }
-
-    template<class T> void number(char tag, T& value) 
-    {
-        if (isReading()) 
-        {
-            expect(tag); expect(' ');
-            const auto token = line();
-            T temporary{};
-            const auto result = std::from_chars(token.data(), token.data() + token.size(), temporary);
-
-            if (result.ec != std::errc{} || result.ptr != token.data() + token.size())
-            {
-                throw ArchiveError("Invalid number in text archive");
-            }
-
-            if constexpr (std::is_floating_point_v<T>)
-            {
-                if (!std::isfinite(temporary))
+                if (input.eof() && !input.bad())
                 {
-                    throw ArchiveError("Non-finite numbers are unsupported");
+                    break;
+                }
+
+                throw ArchiveError("JSON archive I/O failure");
+            }
+
+            if (c == std::char_traits<char>::eof())
+            {
+                if (input.bad() || !input.eof())
+                {
+                    throw ArchiveError("JSON archive I/O failure");
+                }
+
+                break;
+            }
+            consume(1);
+            source += static_cast<char>(c);
+        }
+
+        std::set<std::string> keys;
+        try
+        {
+            auto document = Json::parse(source, [&keys](int depth, Json::parse_event_t event, Json& parsed)
+            {
+                if (depth > 2 || (depth >= 2 && (event == Json::parse_event_t::array_start || event == Json::parse_event_t::object_start)))
+                {
+                    throw ArchiveError("Unexpected nested JSON value");
+                }
+
+                if (event == Json::parse_event_t::key && !keys.insert(parsed.get<std::string>()).second)
+                {
+                    throw ArchiveError("Duplicate JSON field");
+                }
+
+                return true;
+            });
+
+            if (!document.is_object() || document.size() != 3
+                || !document.contains("format") || document["format"] != "OOT-JSON"
+                || !document.contains("version") || !document["version"].is_number_integer()
+                || document["version"] != 1 || !document.contains("values") || !document["values"].is_array())
+            {
+                throw ArchiveError("Invalid JSON archive format or version");
+            }
+
+            for (const auto& value : document["values"])
+            {
+                if (value.is_null() || value.is_structured())
+                {
+                    throw ArchiveError("Invalid JSON archive value");
+                }
+
+                if (value.is_string())
+                {
+                    checkString(value.get_ref<const std::string&>().size());
                 }
             }
-
-            value = temporary;
+            values_ = std::move(document["values"]);
         }
-        
-        else
+        catch (const Json::exception& error)
         {
-            if constexpr (std::is_floating_point_v<T>)
-            {
-                if (!std::isfinite(value))
-                {
-                    throw ArchiveError("Non-finite numbers are unsupported");
-                }
-            }
-
-            std::array<char, 128> buffer{};
-            const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-
-            if (result.ec != std::errc{})
-            {
-                throw ArchiveError("Cannot format number");
-            }
-
-            put(tag); put(' ');
-
-            for (auto p = buffer.data(); p != result.ptr; ++p)
-            {
-                put(*p);
-            }
-
-            put('\n');
+            throw ArchiveError(error.what());
         }
     }
 
     void integer(std::uint64_t& value) override
     {
-        number('u', value);
+        if (isWriting())
+        {
+            append(value);
+            return;
+        }
+
+        const auto& token = next();
+        if (token.is_number_unsigned())
+        {
+            value = token.get<std::uint64_t>();
+        }
+
+        else if (token.is_number_integer() && token.get<std::int64_t>() >= 0)
+        {
+            value = static_cast<std::uint64_t>(token.get<std::int64_t>());
+        }
+
+        else
+        {
+            throw ArchiveError("Expected an unsigned JSON integer");
+        }
     }
 
     void signedInteger(std::int64_t& value) override
     {
-        number('i', value);
+        if (isWriting())
+        {
+            append(value);
+            return;
+        }
+
+        const auto& token = next();
+        if (token.is_number_unsigned())
+        {
+            const auto number = token.get<std::uint64_t>();
+            if (number > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+            {
+                throw ArchiveError("Signed JSON integer out of range");
+            }
+            value = static_cast<std::int64_t>(number);
+        }
+
+        else if (token.is_number_integer())
+        {
+            value = token.get<std::int64_t>();
+        }
+
+        else
+        {
+            throw ArchiveError("Expected a signed JSON integer");
+        }
     }
 
-    void real(double& value) override 
+    void real(double& value) override
     {
-        number('f', value);
+        if (isWriting())
+        {
+            if (!std::isfinite(value))
+            {
+                throw ArchiveError("Non-finite numbers are unsupported");
+            }
+
+            append(value);
+            return;
+        }
+
+        const auto& token = next();
+        if (!token.is_number())
+        {
+            throw ArchiveError("Expected a JSON number");
+        }
+
+        const double number = token.get<double>();
+        if (!std::isfinite(number))
+        {
+            throw ArchiveError("Non-finite numbers are unsupported");
+        }
+        value = number;
     }
 
     void boolean(bool& value) override
     {
-        unsigned temporary = value ? 1 : 0;
-        number('b', temporary);
-
-        if (temporary > 1)
+        if (isWriting())
         {
-            throw ArchiveError("Invalid text boolean");
+            append(value);
+            return;
         }
 
-        if (isReading())
+        const auto& token = next();
+        if (!token.is_boolean())
         {
-            value = temporary != 0;
+            throw ArchiveError("Expected a JSON boolean");
         }
+
+        value = token.get<bool>();
     }
 
-    static unsigned hex(char c) 
+    void string(std::string& value) override
     {
-        if (c >= '0' && c <= '9')
+        if (isWriting())
         {
-            return c - '0';
+            checkString(value.size()); 
+            append(value); 
+            return;
         }
 
-        if (c >= 'a' && c <= 'f')
+        const auto& token = next();
+        if (!token.is_string())
         {
-            return c - 'a' + 10;
+            throw ArchiveError("Expected a JSON string");
         }
 
-        throw ArchiveError("Invalid string escape");
+        value = token.get<std::string>();
     }
 
-    void string(std::string& value) override 
-    {
-        if (isReading()) 
-        {
-            expect('s');
-            expect(' ');
-            expect('"');
-
-            std::string temporary;
-
-            for (;;) 
-            {
-                char c = get();
-
-                if (c == '"')
-                {
-                    break;
-                }
-
-                if (c == '\\') 
-                {
-                    c = get();
-
-                    if (c == 'n')
-                    {
-                        c = '\n';
-                    }
-
-                    else if (c == 'r')
-                    {
-                        c = '\r';
-                    }
-
-                    else if (c == 't')
-                    {
-                        c = '\t';
-                    }
-
-                    else if (c == 'x')
-                    { 
-                        const unsigned high = hex(get()); c = static_cast<char>((high << 4) | hex(get()));
-                    }
-
-                    else if (c != '\\' && c != '"')
-                    {
-                        throw ArchiveError("Unknown string escape");
-                    }
-                }
-                
-                else if (static_cast<unsigned char>(c) < 32 || static_cast<unsigned char>(c) >= 127)
-                {
-                    throw ArchiveError("Unescaped byte in text string");
-                }
-
-                checkString(temporary.size() + 1);
-                temporary += c;
-            }
-
-            expect('\n');
-            value = std::move(temporary);
-        }
-        
-        else 
-        {
-            checkString(value.size());
-            write("s \"");
-            constexpr char digits[] = "0123456789abcdef";
-
-            for (unsigned char c : value)
-            {
-                if (c == '"' || c == '\\')
-                {
-                    put('\\'); put(static_cast<char>(c));
-                }
-
-                else if (c == '\n')
-                {
-                    write("\\n");
-                }
-
-                else if (c == '\r')
-                {
-                    write("\\r");
-                }
-
-                else if (c == '\t') {
-                    write("\\t");
-                }
-
-                else if (c < 32 || c >= 127)
-                {
-                    write("\\x"); put(digits[c >> 4]); put(digits[c & 15]);
-                }
-
-                else
-                {
-                    put(static_cast<char>(c));
-                }
-            }
-
-            write("\"\n");
-        }
-    }
-
-    std::istream* input_ = nullptr;
     std::ostream* output_ = nullptr;
+    Json values_ = Json::array();
+    std::size_t cursor_ = 0;
+    bool first_ = true;
+    bool finished_ = false;
 };
 }

@@ -49,6 +49,8 @@ public:
 
     virtual ~Archive() = default;
 
+    virtual void finish() {}
+
     Archive(const Archive&) = delete;
 
     Archive& operator=(const Archive&) = delete;
