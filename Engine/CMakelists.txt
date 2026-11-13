@@ -27,8 +27,6 @@ add_library(${PROJECT_NAME}
     ${HEADERS}
 )
 
-# Dear ImGui v1.93.0 (MIT): https://github.com/ocornut/imgui/tree/v1.93.0
-# Core only: add a platform/renderer backend when the application has a window.
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Lib/ImGui")
 set(IMGUI_SOURCES
     "${IMGUI_DIR}/imgui.cpp"

@@ -27,8 +27,6 @@ namespace
     void ReplaceFile(const std::filesystem::path& temporary, const std::filesystem::path& target)
     {
 #ifdef _WIN32
-        // std::filesystem::rename cannot replace an existing file on Windows.
-        // Never delete the old file first: a failed replacement must preserve it.
         if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING))
         {
             const auto error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
@@ -46,7 +44,10 @@ void SaveFile(const std::filesystem::path& path,
     try
     {
         if (path.empty() || path.filename().empty() || path.filename() == "." || path.filename() == "..")
+        {
             throw ArchiveError("Invalid archive file path");
+        }
+
         const auto target = std::filesystem::absolute(path);
         std::filesystem::create_directories(target.parent_path());
 
@@ -56,29 +57,50 @@ void SaveFile(const std::filesystem::path& path,
         bool created = false;
         for (unsigned attempt = 0; attempt < 128; ++attempt)
         {
-            directory = target.parent_path() / (".oot-archive-" + std::to_string(stamp)
-                + "-" + std::to_string(sequence.fetch_add(1)));
+            directory = target.parent_path() / (".oot-archive-" + std::to_string(stamp) + "-" + std::to_string(sequence.fetch_add(1)));
             if (std::filesystem::create_directory(directory))
             {
                 created = true;
                 break;
             }
         }
-        if (!created) throw ArchiveError("Cannot reserve a temporary archive directory");
+
+        if (!created)
+        {
+            throw ArchiveError("Cannot reserve a temporary archive directory");
+        }
+
         TemporaryFile temporary{directory, directory / "payload"};
         std::ofstream output(temporary.file, std::ios::binary | std::ios::trunc);
-        if (!output) throw ArchiveError("Cannot open temporary archive file");
+
+        if (!output)
+        {
+            throw ArchiveError("Cannot open temporary archive file");
+        }
+
         write(output);
         output.flush();
-        if (!output) throw ArchiveError("Cannot flush archive file");
+
+        if (!output)
+        {
+            throw ArchiveError("Cannot flush archive file");
+        }
+
         output.close();
-        if (output.fail()) throw ArchiveError("Cannot close archive file");
+
+        if (output.fail())
+        {
+            throw ArchiveError("Cannot close archive file");
+        }
+
         ReplaceFile(temporary.file, target);
     }
+
     catch (const std::filesystem::filesystem_error& error)
     {
         throw ArchiveError(error.what());
     }
+
     catch (const std::ios_base::failure& error)
     {
         throw ArchiveError(error.what());
