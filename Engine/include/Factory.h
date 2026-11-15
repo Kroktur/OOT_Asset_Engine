@@ -4,12 +4,10 @@
 #include <type_traits>
 #include <KTR/Containers/KTR_FlatHashMap.h>
 #include <KTR/Meta/KTR_MetaTools.h>
-
 namespace OOT
 {
 	template<typename T>
 	struct is_smart_ptr : KTR::Meta::false_type{};
-
 	template<typename T>
 	struct is_smart_ptr<std::unique_ptr<T>> : KTR::Meta::true_type{};
 	template<typename T>
@@ -54,7 +52,7 @@ namespace OOT
 	{
 		assert(m_map.Has(id), "key not register");
 		if constexpr (is_smart_ptr_v<T>)
-			return T(static_cast<T::pointer>(m_map[id]()));
+			return T(static_cast<T::element_type*>(m_map[id]()));
 		else
 			return static_cast<T>(m_map[id]());
 	}
