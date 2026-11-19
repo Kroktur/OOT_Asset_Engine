@@ -29,7 +29,7 @@ namespace OOT
 		using id_type = idT;
 		using value_type = creator_fn;
 		using map_type = KTR::container::FlatHashMap<id_type, value_type>;
-		template<typename T> /*requires(std::is_default_constructible_v<T>)*/
+		template<typename T>
 		void Register(id_type id);
 
 		template<typename T>requires(std::is_default_constructible_v<T> && is_ptr_v<T>)
@@ -38,7 +38,7 @@ namespace OOT
 		 map_type m_map = {};
 	};
 	template<typename idT>
-	template <typename T> /*requires (std::is_default_constructible_v<T>)*/
+	template <typename T>
 	void Factory<idT>::Register(id_type id)
 	{
 		assert(!m_map.Has(id), "key already register");

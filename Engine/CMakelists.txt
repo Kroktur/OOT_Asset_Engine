@@ -16,10 +16,31 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     "${SOURCE_DIR}/*.cpp"
 )
 
+list(REMOVE_ITEM HEADERS
+    "${HEADER_DIR}/test.h"
+    "${HEADER_DIR}/ObjectData.h"
+)
+list(REMOVE_ITEM SOURCES "${SOURCE_DIR}/test.cpp")
+
 add_library(${PROJECT_NAME}
     ${SOURCES}
     ${HEADERS}
 )
+
+find_package(Threads REQUIRED)
+target_link_libraries(${PROJECT_NAME} PUBLIC Threads::Threads)
+
+set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Lib/ImGui")
+set(IMGUI_SOURCES
+    "${IMGUI_DIR}/imgui.cpp"
+    "${IMGUI_DIR}/imgui_draw.cpp"
+    "${IMGUI_DIR}/imgui_tables.cpp"
+    "${IMGUI_DIR}/imgui_widgets.cpp"
+    "${IMGUI_DIR}/imgui_demo.cpp"
+)
+target_sources(${PROJECT_NAME} PRIVATE ${IMGUI_SOURCES})
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${IMGUI_DIR}")
+source_group("Dependencies/ImGui" FILES ${IMGUI_SOURCES})
 
 source_group(
     TREE ${HEADER_DIR}
