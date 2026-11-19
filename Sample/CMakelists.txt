@@ -6,6 +6,8 @@ project(Sample)
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(SOURCES
 ${SOURCE_DIR}/main.cpp
+${SOURCE_DIR}/ArthurBackend.cpp
+${SOURCE_DIR}/ArthurBackend.h
 )
 add_executable(${PROJECT_NAME}
     ${SOURCES}
@@ -14,6 +16,8 @@ add_executable(${PROJECT_NAME}
 if(WIN32)
     set(IMGUI_BACKENDS "${CMAKE_CURRENT_SOURCE_DIR}/../Lib/ImGui/backends")
     target_sources(${PROJECT_NAME} PRIVATE
+        "${SOURCE_DIR}/AssetBrowser.h"
+        "${SOURCE_DIR}/AssetBrowser.cpp"
         "${SOURCE_DIR}/ImGuiApplication.h"
         "${SOURCE_DIR}/ImGuiApplication.cpp"
         "${IMGUI_BACKENDS}/imgui_impl_win32.cpp"
