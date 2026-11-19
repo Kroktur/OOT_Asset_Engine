@@ -5,6 +5,21 @@
 #include "Serialization/ArchiveFile.h"
 #include "Assets/AssetManager.h"
 
+#include "Factory.h"
+#include "RTTI.h"
+#include "KTR/Hash/KTR_Hasher.h"
+#include "KTR/Containers/KTR_FlatHashMap.h"
+#include "filesystem"
+#include "fstream"
+#include "RTTI.h"
+#include <array>
+#include <map>
+#include <unordered_map>
+
+#include "BaseObject.h"
+#include "Serialize.h"
+
+
 using oot::serialization::Archive;
 
 namespace OOT
@@ -21,6 +36,13 @@ namespace OOT
 
 struct test : OOT::BaseObject
 {
+	IMPL_RTTI(test)
+private:
+	int t;
+};
+struct test4 : OOT::BaseObject
+{
+	IMPL_RTTI(test4)
     IMPL_RTTI(test)
     int value = 0;
     void Serialize(Archive& ar) override { ar.serialize(value); }
@@ -29,6 +51,34 @@ struct test : OOT::BaseObject
 
 struct test2 : OOT::BaseObject
 {
+	
+	test2()
+	{
+		t = new test4{};
+	}
+	~test2()
+	{
+		delete t;
+	}
+	void Read(Archive& ar) override
+	{
+		delete t;
+		t = OOT::Serialize<OOT::BaseObject*>::Read(ar);
+		toto = OOT::Serialize<int>::Read(ar);
+		std::cout << OOT::TypeInfo::Name(*this);
+		std::cout << OOT::TypeInfo::Name(*t);
+		std::cout << toto;
+	}
+	void Write(Archive& ar) override
+	{
+		OOT::Serialize<OOT::BaseObject*>::Write(ar, t);
+		OOT::Serialize<int>::Write(ar,toto);
+
+	}
+	IMPL_RTTI(test2)
+private:
+	int toto = 5;
+	OOT::BaseObject* t;
     IMPL_RTTI(test2)
     std::string name;
     void Serialize(Archive& ar) override { ar.serialize(name); }
@@ -142,6 +192,44 @@ int graphicalExample(unsigned frameLimit)
         initial.Save(registryPath);
     }
 
+
+int main(int argc, char* argv[])
+{
+	Archive archive;
+	std::filesystem::path path = argv[0];
+	path = path.parent_path().parent_path().parent_path().parent_path().parent_path() / "Resources";
+	archive.OpenFile(path / "test_1.json");
+	//archive.ClearFile();
+	//OOT::Serialize<float>::Write(archive, 5.53f);
+	//std::cout << OOT::Serialize<float>::Read(archive) << std::endl;
+	using t = std::vector<
+		std::map<
+		std::string,
+		std::vector<std::pair<int, float>>
+		>
+	>;
+	t test;/* = {
+	{
+		{
+			"Player",
+			{
+				{100, 10.5f},
+				{200, 20.5f}
+			}
+		},
+		{
+			"Enemy",
+			{
+				{50, 5.5f},+
+				{75, 7.5f}
+			}
+		}
+	}
+	};*/
+	//OOT::Serialize<t>::Write(archive, test);
+	test = OOT::Serialize<t>::Read(archive);
+	archive.CloseFile();
+	//delete test;
     std::unique_ptr<AssetRegistry> registry;
     std::unique_ptr<AssetManager> manager;
     std::vector<AssetMetadata> rows;
@@ -297,6 +385,9 @@ int main(int argc, char** argv)
         std::cout << OOT::TypeInfo::Name(*create) << '\n';
         std::cout << OOT::TypeInfo::Name(*create2) << '\n';
 
+	delete create;
+	return 0;
+}
         example<oot::serialization::BinaryArchive>("Binary");
         example<oot::serialization::TextArchive>("JSON");
         assetExample();
