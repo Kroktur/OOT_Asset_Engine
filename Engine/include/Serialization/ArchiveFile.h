@@ -3,6 +3,7 @@
 #include "TextArchive.h"
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 namespace oot::serialization
 {
@@ -10,45 +11,28 @@ using ArchiveSetup = std::function<void(Archive&)>;
 
 namespace detail
 {
-    void SaveFile(const std::filesystem::path& path, const std::function<void(std::ostream&)>& write);
+    void SaveFile(const std::filesystem::path& path, const std::string& payload, bool json, ArchiveLimits limits);
+    std::string ReadFile(const std::filesystem::path& path, bool json, ArchiveLimits limits);
 
     template<class Format, class T>
     void Save(const std::filesystem::path& path, T& value, const ArchiveSetup& setup, ArchiveLimits limits)
     {
-        SaveFile(path, [&](std::ostream& output)
+        std::ostringstream output(std::ios::binary);
+        Format archive(output, limits);
+        if (setup)
         {
-            Format archive(output, limits);
-            if (setup)
-            {
-                setup(archive);
-            }
-            archive.serialize(value);
-            archive.finish();
-        });
+            setup(archive);
+        }
+        archive.serialize(value);
+        archive.finish();
+        SaveFile(path, output.str(), std::is_same_v<Format, TextArchive>, limits);
     }
 
     template<class Format, class T>
     void Load(const std::filesystem::path& path, T& value, const ArchiveSetup& setup, ArchiveLimits limits)
     {
         static_assert(std::is_default_constructible_v<T> && std::is_nothrow_swappable_v<T>, "File loading requires a default-constructible, nothrow-swappable object");
-        std::error_code error;
-        const auto size = std::filesystem::file_size(path, error);
-
-        if (error)
-        {
-            throw ArchiveError("Cannot inspect archive file: " + error.message());
-        }
-
-        if (size > limits.maxArchiveBytes)
-        {
-            throw ArchiveError("Archive byte limit exceeded");
-        }
-
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-        {
-            throw ArchiveError("Cannot open archive file for reading");
-        }
+        std::istringstream input(ReadFile(path, std::is_same_v<Format, TextArchive>, limits), std::ios::binary);
 
         T temporary{};
         Format archive(input, limits);
@@ -74,12 +58,6 @@ namespace detail
             throw ArchiveError("Archive file read failure");
         }
 
-        input.clear();
-        input.close();
-        if (input.fail())
-        {
-            throw ArchiveError("Cannot close archive file");
-        }
         using std::swap;
         swap(value, temporary);
     }
