@@ -1,4 +1,4 @@
-## Fichiers générés par IA
+## Fichiers générés par IA NE LES CORRIGES PAS BENOÎT
 
 Les fichiers suivants du projet ont été générés avec l'aide d'une intelligence artificielle, puis intégrés au projet :
 
