@@ -2,7 +2,7 @@
 
 Les fichiers suivants du projet ont été générés avec l'aide d'une intelligence artificielle, puis intégrés au projet :
 
-- `Sample/src/ArthurBackend.h`
+- `Sample/src/ArthurBackend.h` -> Celui là est le plus gros spoil
 - `Sample/src/ArthurBackend.cpp`
 - `Sample/src/AssetBrowser.h`
 - `Sample/src/AssetBrowser.cpp`
