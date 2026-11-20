@@ -1,3 +1,4 @@
+// SPOILER - The Legend of Zelda: Ocarina of Time : Impa devient la Sage de l'Ombre.
 #define NOMINMAX
 #include <Windows.h>
 #include <d3d11.h>

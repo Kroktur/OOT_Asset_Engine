@@ -1,38 +1,21 @@
+// SPOILER - The Legend of Zelda: Ocarina of Time : Ganondorf devient Ganon lors du combat final.
 #include "ArthurBackend.h"
 #include "Serialization/ArchiveFile.h"
-#include "BaseObject.h"
+#include "Object.h"
+#include <cmath>
 #include <atomic>
 #include <chrono>
 #include <cstring>
 #include <mutex>
 #include <set>
 
-namespace sample::arthur
+namespace sample::objects
 {
 namespace
 {
-    constexpr const char* Marker = "OOT-Arthur-1";
-    // Keep Arthur's native API and polymorphic factory dispatch.
-    struct ArthurAsset : OOT::BaseObject
-    {
-        IMPL_RTTI(ArthurAsset)
-        AssetData data;
-        void Write(::Archive& archive) override
-        {
-            OOT::Serialize<int>::Write(archive, data.value);
-            OOT::Serialize<std::string>::Write(archive, data.name);
-            OOT::Serialize<decltype(data.values)>::Write(archive, data.values);
-        }
-        void Read(::Archive& archive) override
-        {
-            data.value = OOT::Serialize<int>::Read(archive);
-            data.name = OOT::Serialize<std::string>::Read(archive);
-            data.values = OOT::Serialize<decltype(data.values)>::Read(archive);
-        }
-    };
-
+    constexpr const char* Marker = "OOT-Arthur-Objects-1";
     // Arthur's reader allocates from file counts and uses asserts. Check the
-    // demo schema before invoking it, without changing his implementation.
+    // Object.h schema before invoking it, without changing his implementation.
     class Validator
     {
     public:
@@ -52,16 +35,8 @@ namespace
         }
         void Check()
         {
-            if (String() != Marker || Number<OOT::rtti_id_type>() != OOT::TypeInfo::Id<ArthurAsset>()) Fail();
-            Number<int>(); String();
-            std::set<std::string> keys;
-            const auto count = Count();
-            for (std::size_t i = 0; i < count; ++i)
-            {
-                if (!keys.insert(String()).second) Fail();
-                const auto size = Count();
-                for (std::size_t j = 0; j < size; ++j) Number<int>();
-            }
+            if (String() != Marker) Fail();
+            Object(0);
             if (cursor_ != (json_ ? values_.size() : bytes_.size())) Fail();
         }
     private:
@@ -92,6 +67,42 @@ namespace
             }
             else if (value < std::numeric_limits<T>::min() || value > std::numeric_limits<T>::max()) Fail();
             return static_cast<T>(value);
+        }
+        void Object(unsigned depth)
+        {
+            if (depth >= 32) Fail();
+            const auto id = Number<OOT::rtti_id_type>();
+            if (id == OOT::TypeInfo::Id<IntegralObject>())
+            {
+                Number<int>();
+                float value;
+                if (json_)
+                {
+                    if (cursor_ >= values_.size() || !values_[cursor_].is_number()) Fail();
+                    const double number = values_[cursor_++].get<double>();
+                    if (!std::isfinite(number) || std::abs(number) > std::numeric_limits<float>::max()) Fail();
+                    value = static_cast<float>(number);
+                }
+                else
+                {
+                    if (bytes_.size() - cursor_ < sizeof(float)) Fail();
+                    std::memcpy(&value, bytes_.data() + cursor_, sizeof(float));
+                    cursor_ += sizeof(float);
+                }
+                if (!std::isfinite(value)) Fail();
+            }
+            else if (id == OOT::TypeInfo::Id<MapObject>())
+            {
+                std::set<std::string> keys;
+                const auto count = Count();
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    if (!keys.insert(String()).second) Fail();
+                    Number<int>(); Number<int>();
+                }
+            }
+            else if (id == OOT::TypeInfo::Id<PolyMorphObject>()) Object(depth + 1);
+            else Fail();
         }
         std::size_t Count()
         {
@@ -148,7 +159,7 @@ namespace
     std::mutex factoryMutex;
 }
 
-void Save(const std::filesystem::path& path, AssetData data, bool json)
+void SaveArthur(const std::filesystem::path& path, OOT::BaseObject& value, bool json)
 {
     StagingFile staging(json);
     {
@@ -157,10 +168,8 @@ void Save(const std::filesystem::path& path, AssetData data, bool json)
         archive.OpenFile(staging.file);
         archive.ClearFile();
         OOT::Serialize<std::string>::Write(archive, Marker);
-        auto derived = std::make_unique<ArthurAsset>();
-        derived->data = std::move(data);
-        std::unique_ptr<OOT::BaseObject> object = std::move(derived);
-        OOT::Serialize<decltype(object)>::Write(archive, object);
+        auto* object = &value;
+        OOT::Serialize<OOT::BaseObject*>::Write(archive, object);
         archive.CloseFile();
     }
     if (std::filesystem::file_size(staging.file) > oot::serialization::ArchiveLimits{}.maxArchiveBytes)
@@ -173,7 +182,7 @@ void Save(const std::filesystem::path& path, AssetData data, bool json)
     oot::serialization::detail::SaveFile(path, payload, json, {});
 }
 
-AssetData Load(const std::filesystem::path& path, bool json)
+std::unique_ptr<OOT::BaseObject> LoadArthur(const std::filesystem::path& path, bool json)
 {
     const auto payload = oot::serialization::detail::ReadFile(path, json, {});
     Validator(payload, json).Check();
@@ -192,17 +201,92 @@ AssetData Load(const std::filesystem::path& path, bool json)
     // CloseFile rewrites JSON in Arthur's implementation: only the staging copy
     // is opened, so loading never modifies the user's original file.
     archive.CloseFile();
-    return dynamic_cast<ArthurAsset&>(*object).data;
+    return object;
 }
 
-void VerifyRoundTrips(const std::filesystem::path& directory)
+
+namespace
 {
-    const AssetData original{73, "Arthur example", {{"coordinates", {1, 2, 3}}, {"empty", {}}}};
-    for (bool json : {false, true})
+    void Setup(oot::serialization::Archive& archive)
     {
-        const auto path = directory / (json ? "arthur.json" : "arthur.txt");
-        Save(path, original, json);
-        if (Load(path, json) != original) throw std::runtime_error("Arthur round-trip failed");
+        archive.registerType<OOT::BaseObject, MapObject>();
+        archive.registerType<OOT::BaseObject, IntegralObject>();
+        archive.registerType<OOT::BaseObject, PolyMorphObject>();
     }
+    template<class Format> void SaveNoe(const std::filesystem::path& path, OOT::BaseObject& object, bool json)
+    {
+        std::ostringstream output(std::ios::binary);
+        Format archive(output);
+        Setup(archive);
+        std::string type = OOT::TypeInfo::Name(object);
+        archive.serialize(type);
+        object.Serialize(archive);
+        archive.finish();
+        oot::serialization::detail::SaveFile(path, output.str(), json, {});
+    }
+    template<class Format> std::unique_ptr<OOT::BaseObject> LoadNoe(const std::filesystem::path& path, bool json)
+    {
+        std::istringstream input(oot::serialization::detail::ReadFile(path, json, {}), std::ios::binary);
+        Format archive(input);
+        Setup(archive);
+        std::string type;
+        archive.deserialize(type);
+        auto object = Create(type);
+        object->Deserialize(archive);
+        archive.finish();
+        if (input.bad() || (!input.eof() && input.peek() != std::char_traits<char>::eof()))
+            throw oot::serialization::ArchiveError("Trailing object data");
+        return object;
+    }
+    void ValidateObject(OOT::BaseObject& object, unsigned depth = 0)
+    {
+        if (depth >= 32) throw std::runtime_error("Object nesting limit exceeded");
+        if (auto* value = dynamic_cast<IntegralObject*>(&object))
+        {
+            if (!std::isfinite(value->FloatValue())) throw std::runtime_error("Float must be finite");
+        }
+        else if (auto* value = dynamic_cast<MapObject*>(&object))
+        {
+            if (value->Entries().size() > 1'000'000) throw std::runtime_error("Too many map entries");
+        }
+        else if (auto* value = dynamic_cast<PolyMorphObject*>(&object))
+        {
+            if (!value->GetObject()) throw std::runtime_error("Missing child object");
+            ValidateObject(*value->GetObject(), depth + 1);
+        }
+        else throw std::runtime_error("Unsupported object type");
+    }
+}
+std::unique_ptr<OOT::BaseObject> Create(std::string_view type)
+{
+    if (type == "MapObject") return std::make_unique<MapObject>();
+    if (type == "IntegralObject") return std::make_unique<IntegralObject>();
+    if (type == "PolyMorphObject") return std::make_unique<PolyMorphObject>();
+    throw oot::serialization::ArchiveError("Unsupported object type");
+}
+void Save(const std::filesystem::path& path, OOT::BaseObject& object, bool json, int backend)
+{
+    ValidateObject(object);
+    if (backend == 1) SaveArthur(path, object, json);
+    else
+    {
+        std::lock_guard lock(factoryMutex);
+        if (json) SaveNoe<oot::serialization::TextArchive>(path, object, true);
+        else SaveNoe<oot::serialization::BinaryArchive>(path, object, false);
+    }
+}
+std::shared_ptr<OOT::BaseObject> Load(const std::filesystem::path& path, bool json, int backend)
+{
+    std::unique_ptr<OOT::BaseObject> result;
+    if (backend == 1) result = LoadArthur(path, json);
+    else
+    {
+        std::lock_guard lock(factoryMutex);
+        result = json ? LoadNoe<oot::serialization::TextArchive>(path, true)
+                      : LoadNoe<oot::serialization::BinaryArchive>(path, false);
+    }
+    if (!result) throw std::runtime_error("Missing object");
+    ValidateObject(*result);
+    return result;
 }
 }

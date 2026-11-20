@@ -1,3 +1,4 @@
+// SPOILER - The Legend of Zelda: Ocarina of Time : Nabooru devient la Sage de l'Esprit.
 #pragma once
 #include <functional>
 

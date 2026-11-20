@@ -1,20 +1,13 @@
+// SPOILER - The Legend of Zelda: Ocarina of Time : A la fin, Zelda renvoie Link dans son enfance.
 #pragma once
 #include <filesystem>
-#include <map>
-#include <string>
-#include <vector>
-
-namespace sample::arthur
+#include <memory>
+#include <string_view>
+namespace OOT { struct BaseObject; }
+namespace sample::objects
 {
-// Plain boundary object: Arthur's Archive/BaseObject never leak into Noe's TU.
-struct AssetData
-{
-    int value = 0;
-    std::string name;
-    std::map<std::string, std::vector<int>> values;
-    bool operator==(const AssetData&) const = default;
-};
-void Save(const std::filesystem::path& path, AssetData data, bool json);
-AssetData Load(const std::filesystem::path& path, bool json);
-void VerifyRoundTrips(const std::filesystem::path& directory);
+inline constexpr const char* Types[] = {"MapObject", "IntegralObject", "PolyMorphObject"};
+std::unique_ptr<OOT::BaseObject> Create(std::string_view type);
+void Save(const std::filesystem::path& path, OOT::BaseObject& object, bool json, int backend);
+std::shared_ptr<OOT::BaseObject> Load(const std::filesystem::path& path, bool json, int backend);
 }

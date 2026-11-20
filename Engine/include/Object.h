@@ -5,6 +5,11 @@ struct MapObject : OOT::BaseObject
 {
 	IMPL_RTTI(MapObject);
 	MapObject() = default;
+	std::map<std::string, std::pair<int, int>>& Entries()
+	{
+		return m_map;
+	}
+
 	void Read(Archive& archive) override
 	{
 		m_map = OOT::Serialize<std::map<std::string, std::pair<int, int>>>::Read(archive);
@@ -29,6 +34,16 @@ struct IntegralObject : OOT::BaseObject
 {
 	IMPL_RTTI(IntegralObject);
 	IntegralObject() = default;
+	int& Value()
+	{
+		return m_value;
+	}
+
+	float& FloatValue()
+	{
+		return m_valueF;
+	}
+
 	void Read(Archive& archive) override
 	{
 		m_value = OOT::Serialize<int>::Read(archive);
@@ -51,8 +66,8 @@ struct IntegralObject : OOT::BaseObject
 		ar.deserialize(m_valueF);
 	}
 private:
-	int m_value;
-	float m_valueF;
+	int m_value = 0;
+	float m_valueF = 0.0f;
 };
 
 struct PolyMorphObject : OOT::BaseObject
@@ -60,30 +75,36 @@ struct PolyMorphObject : OOT::BaseObject
 	IMPL_RTTI(PolyMorphObject);
 	PolyMorphObject()
 	{
-		object = new IntegralObject();
+		object = std::make_unique<IntegralObject>();
 	}
-	~PolyMorphObject() override
+	OOT::BaseObject* GetObject() { return object.get(); }
+	void SetObject(std::unique_ptr<OOT::BaseObject> value)
 	{
-		delete object;
+		if (!value)
+		{
+			throw std::invalid_argument("A child object is required");
+		}
+
+		object = std::move(value);
 	}
 	void Serialize(oot::serialization::Archive& ar) override
 	{
-		ar.serialize(*object);
+		ar.serialize(object);
 	}
 	void Deserialize(oot::serialization::Archive& ar) override
 	{
-		ar.deserialize(*object);
+		ar.deserialize(object);
 	}
 	void Read(Archive& archive) override
 	{
-		object = OOT::Serialize<OOT::BaseObject*>::Read(archive);
+		object = OOT::Serialize<std::unique_ptr<OOT::BaseObject>>::Read(archive);
 	}
 	void Write(Archive& archive) override
 	{
-		OOT::Serialize<OOT::BaseObject*>::Write(archive, object);
+		OOT::Serialize<std::unique_ptr<OOT::BaseObject>>::Write(archive, object);
 	}
 private:
-	OOT::BaseObject* object;
+	std::unique_ptr<OOT::BaseObject> object;
 };
 
 

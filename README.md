@@ -6,6 +6,8 @@ Les fichiers suivants du projet ont été générés avec l'aide d'une intellige
 - `Sample/src/ArthurBackend.cpp`
 - `Sample/src/AssetBrowser.h`
 - `Sample/src/AssetBrowser.cpp`
+- `Sample/src/ObjectEditor.h`
+- `Sample/src/ObjectEditor.cpp`
 - `Sample/src/ImGuiApplication.h`
 - `Sample/src/ImGuiApplication.cpp`
 - `Sample/src/main.cpp`

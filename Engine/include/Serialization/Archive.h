@@ -303,6 +303,13 @@ private:
         }
     }
 
+    template<class First, class Second> void process(std::pair<First, Second>& value)
+    {
+        DepthGuard guard(*this);
+        process(value.first);
+        process(value.second);
+    }
+
     template<class T, class Allocator> void process(std::vector<T, Allocator>& value) 
     {
         DepthGuard guard(*this);
