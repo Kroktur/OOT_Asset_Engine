@@ -1,6 +1,6 @@
 ## Fichiers générés par IA NE LES CORRIGES PAS BENOÎT
 
-Les fichiers suivants du projet ont été générés avec l'aide d'une intelligence artificielle, puis intégrés au projet avec des spoilS de Ocarina of Time :
+Les fichiers suivants du projet ont été générés avec l'aide d'une intelligence artificielle, puis intégrés au projet avec des spoils de Ocarina of Time :
 
 - `Sample/src/ArthurBackend.h` -> Celui là est le plus gros spoil
 - `Sample/src/ArthurBackend.cpp` -> Lui tu t'en doutes
