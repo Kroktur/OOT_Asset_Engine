@@ -3,6 +3,8 @@
 
 #include "RTTI.h"
 #include "Serialize.h"
+#include "Serialization/ArchiveFile.h"
+
 namespace OOT
 {
 	struct BaseObject : OOT::BaseRtti
@@ -10,8 +12,12 @@ namespace OOT
 	public:
 		BaseObject() = default;
 		IMPL_RTTI(BaseObject)
+		// arthur
 		virtual void Read(Archive&) {}
 		virtual void Write(Archive&) {}
+		// noe
+		virtual void Serialize(oot::serialization::Archive&) {}
+		virtual void Deserialize(oot::serialization::Archive&) {}
 	};
 }
 

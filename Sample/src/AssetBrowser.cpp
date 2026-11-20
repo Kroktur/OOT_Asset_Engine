@@ -1,51 +1,48 @@
 #include "AssetBrowser.h"
 #include "ArthurBackend.h"
+#include "BaseObject.h"
 #include "Assets/AssetManager.h"
 #include "Serialization/ArchiveFile.h"
 #include "ImGuiApplication.h"
 #include "imgui.h"
 
-using oot::serialization::Archive;
 
-namespace OOT
-{
-    struct NoeBaseObject : OOT::BaseRtti
-    {
-    public:
-        NoeBaseObject() = default;
-        IMPL_RTTI(NoeBaseObject)
-        virtual void Serialize(Archive&) {}
-        virtual void Deserialize(Archive&) {}
-    };
-}
-
-struct test : OOT::NoeBaseObject
+struct test : OOT::BaseObject
 {
     IMPL_RTTI(test)
     int value = 0;
-    void Serialize(Archive& ar) override { ar.serialize(value); }
-    void Deserialize(Archive& ar) override { ar.deserialize(value); }
+    void Serialize(oot::serialization::Archive& ar) override { ar.serialize(value); }
+    void Deserialize(oot::serialization::Archive& ar) override { ar.deserialize(value); }
 };
 
-struct test2 : OOT::NoeBaseObject
+struct test2 : OOT::BaseObject
 {
     IMPL_RTTI(test2)
     std::string name;
-    void Serialize(Archive& ar) override { ar.serialize(name); }
-    void Deserialize(Archive& ar) override { ar.deserialize(name); }
+   
+    
+    void Serialize(oot::serialization::Archive& ar) override
+    {
+	    ar.serialize(name);
+       
+    }
+    void Deserialize(oot::serialization::Archive& ar) override
+    {
+	    ar.deserialize(name);
+    }
 };
 
 struct test3 : test, test2
 {
     IMPL_RTTI(test3)
     std::map<std::string, std::vector<int>> values;
-    void Serialize(Archive& ar) override
+    void Serialize(oot::serialization::Archive& ar) override
     {
         test::Serialize(ar);
         test2::Serialize(ar);
         ar.serialize(values);
     }
-    void Deserialize(Archive& ar) override
+    void Deserialize(oot::serialization::Archive& ar) override
     {
         test::Deserialize(ar);
         test2::Deserialize(ar);
