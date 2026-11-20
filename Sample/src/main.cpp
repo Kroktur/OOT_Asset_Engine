@@ -1,3 +1,5 @@
+// SPOILER - The Legend of Zelda: Ocarina of Time : Epona est une jument
+
 #include <exception>
 #include <iostream>
 #include <string_view>
